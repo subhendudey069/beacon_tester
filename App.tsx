@@ -1,118 +1,169 @@
-/**
- * Sample React Native App
- * https://github.com/facebook/react-native
- *
- * @format
- */
+'use strict';
 
-import React from 'react';
-import type {PropsWithChildren} from 'react';
+import React, { useEffect, useState } from 'react';
 import {
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
+  AppRegistry,
   StyleSheet,
+  Platform,
   Text,
-  useColorScheme,
+  FlatList,
   View,
+  DeviceEventEmitter,
+  TextInput
 } from 'react-native';
+import beacons from '@kojongdev/react-native-beacons-manager';
 
-import {
-  Colors,
-  DebugInstructions,
-  Header,
-  LearnMoreLinks,
-  ReloadInstructions,
-} from 'react-native/Libraries/NewAppScreen';
-
-type SectionProps = PropsWithChildren<{
-  title: string;
-}>;
-
-function Section({children, title}: SectionProps): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
-  return (
-    <View style={styles.sectionContainer}>
-      <Text
-        style={[
-          styles.sectionTitle,
-          {
-            color: isDarkMode ? Colors.white : Colors.black,
-          },
-        ]}>
-        {title}
-      </Text>
-      <Text
-        style={[
-          styles.sectionDescription,
-          {
-            color: isDarkMode ? Colors.light : Colors.dark,
-          },
-        ]}>
-        {children}
-      </Text>
-    </View>
-  );
+interface Beacon {
+  uuid: string;
+  major: number;
+  minor: number;
+  rssi: number;
+  proximity: string;
+  accuracy: number;
+  distance: number;
 }
 
-function App(): React.JSX.Element {
-  const isDarkMode = useColorScheme() === 'dark';
+const ReactNativeBeaconExample: React.FC = () => {
+  const [uuidRef] = useState('fda50693-a4e2-4fb1-afcf-c6eb07647825');
+  const [clientID] = useState(Math.floor(Math.random() * 1000));
+  const [beaconsData, setBeaconsData] = useState<Beacon[]>([]);
+  const [url, setUrl] = useState('http://192.168.43.30:80');
 
-  const backgroundStyle = {
-    backgroundColor: isDarkMode ? Colors.darker : Colors.lighter,
+  useEffect(() => {
+    if (Platform.OS === 'android') {
+      beacons.detectIBeacons();
+
+      const filterValue = 5000;
+      const filterType = beacons.RUNNING_AVG_RSSI_FILTER;
+
+      ((filterType != undefined) || (filterType != null)) && beacons.setRssiFilter(filterType, filterValue);
+
+      if (uuidRef) {
+        beacons
+          .startRangingBeaconsInRegion('REGION1', uuidRef)
+          .then(() => console.log('Beacons ranging started successfully'))
+          .catch(error => console.log(`Beacons ranging not started, error: ${error}`));
+      }
+    } else {
+      beacons.requestWhenInUseAuthorization();
+      const region = {
+        identifier: 'REGION1',
+        uuid: uuidRef
+      };
+      beacons.startRangingBeaconsInRegion(region);
+    }
+
+    const beaconsDidRange = DeviceEventEmitter.addListener('beaconsDidRange', (data: { beacons: Beacon[] }) => {
+      console.log('----------------------------------------------------------');
+      console.log(data.beacons);
+      console.log(data);
+      if (data.beacons.length === 3) {
+        setBeaconsData(data.beacons);
+
+        let distances = data.beacons.map(beacon => ({
+          beaconId: beacon.major,
+          distance: Platform.OS === 'ios' ? beacon.accuracy : beacon.distance
+        }));
+
+        let payload = {
+          id: clientID,
+          distance: distances
+        };
+
+        fetch(url, {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(payload),
+        }).catch(() => {
+          console.log("network error");
+        });
+      }
+    });
+
+    return () => {
+      beaconsDidRange.remove();
+    };
+  }, [uuidRef, clientID, url]);
+
+  const renderRow = ({ item }: { item: Beacon }) => {
+    var beacon_distance = Platform.OS === 'ios' ? item.accuracy : item.distance;
+    return (
+      <View style={styles.row}>
+        <Text style={styles.smallText}>UUID: {item.uuid ? item.uuid : 'NA'}</Text>
+        <Text style={styles.smallText}>Major: {item.major}</Text>
+        <Text style={styles.smallText}>Minor: {item.minor}</Text>
+        <Text>RSSI: {item.rssi ? item.rssi : 'NA'}</Text>
+        <Text>Proximity: {item.proximity ? item.proximity : 'NA'}</Text>
+        <Text>Distance: {beacon_distance ? beacon_distance.toFixed(2) : 'NA'} m</Text>
+      </View>
+    );
   };
 
   return (
-    <SafeAreaView style={backgroundStyle}>
-      <StatusBar
-        barStyle={isDarkMode ? 'light-content' : 'dark-content'}
-        backgroundColor={backgroundStyle.backgroundColor}
+    <View style={styles.container}>
+      <View style={styles.inputContainer}>
+        <Text style={styles.label}>Beacon Server URL:</Text>
+        <TextInput
+          style={styles.textInput}
+          value={url}
+          onChangeText={(val) => {
+            console.log('Value is ,', val);
+            setUrl(val);
+          }}
+        />
+      </View>
+      <Text style={styles.headline}>All beacons in the area</Text>
+      <FlatList
+        data={beaconsData}
+        keyExtractor={(item) => item.uuid + item.major + item.minor}
+        renderItem={renderRow}
       />
-      <ScrollView
-        contentInsetAdjustmentBehavior="automatic"
-        style={backgroundStyle}>
-        <Header />
-        <View
-          style={{
-            backgroundColor: isDarkMode ? Colors.black : Colors.white,
-          }}>
-          <Section title="Step One">
-            Edit <Text style={styles.highlight}>App.tsx</Text> to change this
-            screen and then come back to see your edits.
-          </Section>
-          <Section title="See Your Changes">
-            <ReloadInstructions />
-          </Section>
-          <Section title="Debug">
-            <DebugInstructions />
-          </Section>
-          <Section title="Learn More">
-            Read the docs to discover what to do next:
-          </Section>
-          <LearnMoreLinks />
-        </View>
-      </ScrollView>
-    </SafeAreaView>
+    </View>
   );
-}
+};
 
 const styles = StyleSheet.create({
-  sectionContainer: {
-    marginTop: 32,
-    paddingHorizontal: 24,
+  container: {
+    flex: 1,
+    paddingTop: 60,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F5FCFF'
   },
-  sectionTitle: {
-    fontSize: 24,
-    fontWeight: '600',
+  btleConnectionStatus: {
+    paddingTop: 20
   },
-  sectionDescription: {
-    marginTop: 8,
-    fontSize: 18,
-    fontWeight: '400',
+  headline: {
+    fontSize: 20,
+    paddingTop: 20
   },
-  highlight: {
-    fontWeight: '700',
+  row: {
+    padding: 8,
+    paddingBottom: 16
   },
+  smallText: {
+    fontSize: 11
+  },
+  inputContainer: {
+    width: '80%',
+    marginVertical: 10,
+  },
+  label: {
+    fontSize: 16,
+    marginBottom: 5,
+    color: '#333',
+  },
+  textInput: {
+    borderWidth: 1,
+    borderColor: '#ccc',
+    borderRadius: 4,
+    padding: 10,
+    fontSize: 16,
+    backgroundColor: '#fff',
+  }
 });
 
-export default App;
+export default ReactNativeBeaconExample;
